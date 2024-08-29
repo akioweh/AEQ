@@ -1,11 +1,13 @@
 import cmath
 import math
 from abc import abstractmethod
+from collections.abc import Collection, Iterable, Iterator, Generator
 from functools import reduce
-from typing import Iterable, TypeAlias
+from typing import TypeAlias
 
 import numpy as np
-from numpy import ndarray
+from numpy import float64
+from numpy.typing import NDArray
 from scipy.signal import sosfilt, sosfreqz
 
 from .base import Filter
@@ -13,7 +15,7 @@ from .iir import BiquadFilter
 
 
 class PEQFilter(BiquadFilter):
-    """Parametric filter implemented using a biquad filter.
+    """Parametric filter implemented using biquad (second-order) sections.
 
     Subclasses should offer a specific filter type (low-pass, high-pass, etc.)
     and calculate the coefficients from more human-friendly parameters
@@ -119,7 +121,8 @@ class PEQFilter(BiquadFilter):
 
         Recall when intervars change.
         """
-        raise NotImplementedError
+        raise NotImplementedError('This method must be implemented in each specific filter class,'
+                                  'based on how that filter works.')
 
     def _set_coefs(self, a0: float, a1: float, a2: float, b0: float, b1: float, b2: float):
         """Helper method to set the biquad coefficients."""
@@ -384,6 +387,9 @@ class ParametricEqualizer(Filter):
         # noinspection PyTypeChecker
         return [(*flt.coefs_b_n, *flt.coefs_a_n) for flt in self.filters]
 
+    def transfer_function(self, z: complex) -> complex:
+        pass
+
     def add_filter(self, filter_: PEQFilter):
         """Add a pre-made ``PEQFilter`` object.
         Sample rate ``fs`` must match.
@@ -443,7 +449,7 @@ class ParametricEqualizer(Filter):
         return cmath.phase(self.response_at(f))
 
     @staticmethod
-    def decibelize(x: float | list[float]) -> float | list[float]:
+    def decibelize(x: float | Collection[float]) -> float | list[float]:
         """Converts linear scale (response function output) to decibel scale.
         Can accept either a single value or an iterable of values.
         """
@@ -493,7 +499,21 @@ class ParametricEqualizer(Filter):
         f_s, fr = self.frequency_resp(nsamples, min_f, max_f, log)
         return f_s, self.decibelize(fr)
 
-    def impulse_resp(self, n: int) -> list[float] | ndarray:
+    def apply(self, x: Collection[float]) -> list[float] | NDArray[float64]:
+        return sosfilt(self.coefs_sos, x)
+
+    def apply_on(self, stream: Iterator[float]) -> Generator[float, None, None]:
+        x2, x1 = 0., 0.
+        y2, y1 = 0., 0.
+        for x in stream:
+            y = x
+            for flt in self.filters:
+                y = flt.difference_eq(y, x1, x2, y1, y2)
+            yield y
+            y2, y1 = y1, y
+            x2, x1 = x1, x
+
+    def impulse_resp(self, n: int) -> list[float] | NDArray[float64]:
         """Generates the impulse response of the entire equalizer for ``n`` samples."""
         x = np.zeros(n)
         x[0] = 1

@@ -7,14 +7,15 @@ import struct
 from collections.abc import Iterable
 from dataclasses import dataclass, astuple
 from itertools import zip_longest
-from typing import Final, TypeAlias, Literal
+from typing import Final, TypeAlias, Literal, TYPE_CHECKING
 
-from numpy import ndarray
+if TYPE_CHECKING:
+    from numpy import ndarray
 
 SampleRate: TypeAlias = Literal[8000, 11025, 16000, 22050, 32000, 44100, 48000, 96000, 192000, 384000]
 BitDepth: TypeAlias = Literal[8, 16, 24, 32, 64]  # 64 is for floating point samples only
 SampleType: TypeAlias = int | float
-Channel: TypeAlias = list[SampleType] | ndarray
+Channel: TypeAlias = 'list[SampleType] | ndarray'
 
 INT_TYPES: Final[dict[BitDepth, str]] = {
     8: 'b',

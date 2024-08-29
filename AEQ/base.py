@@ -1,7 +1,9 @@
 """
 Base classes for filters.
 """
+import cmath
 from abc import ABC, abstractmethod
+from collections.abc import Collection, Iterator, Generator
 
 
 class Filter(ABC):
@@ -33,25 +35,39 @@ class Filter(ABC):
     #     return self.coefs[1]
 
     @abstractmethod
-    def response_at(self, f: float) -> complex:
-        """The response of the filter at the given frequency (as a complex output).
-
-        The magnitude (modulus) of the output is the frequency response,
-        and the angle (argument) of the output is the phase response.
-        """
+    def transfer_function(self, z: complex) -> complex:
+        """The transfer function of the filter."""
         raise NotImplementedError
 
-    @abstractmethod
+    def response_at(self, w: float) -> complex:
+        """Returns the complex response factor ``H(z)`` at given NORMALIZED ANGULAR frequency ``w``.
+        (``z = exp(jw)`` where ``w = 2 * pi * freq / sampling_frequency``)
+
+          - ``|H(z)|`` -> amplitude response factor
+          - ``arg(H(z))`` -> phase shift (rads)
+        """
+        return self.transfer_function(cmath.rect(1, w))
+
     def frequency_resp_at(self, f: float) -> float:
         """The frequency response of the filter at the given frequency."""
-        raise NotImplementedError
+        return abs(self.response_at(f))
 
-    @abstractmethod
     def phase_resp_at(self, f: float) -> float:
         """The phase response of the filter at the given frequency."""
+        return cmath.phase(self.response_at(f))
+
+    @abstractmethod
+    def apply(self, x: Collection[float]) -> list[float]:
+        """Apply the filter to a list of samples."""
         raise NotImplementedError
 
     @abstractmethod
+    def apply_on(self, stream: Iterator[float]) -> Generator[float, None, None]:
+        """Continuously apply the filter to a stream of samples."""
+        raise NotImplementedError
+
     def impulse_resp(self, n: int) -> list[float]:
         """The discrete impulse response of the filter for ``n`` samples."""
-        raise NotImplementedError
+        x = [0.] * n
+        x[0] = 1
+        return self.apply(x)

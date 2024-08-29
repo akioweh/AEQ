@@ -2,9 +2,9 @@
 Infinite Impulse Response (IIR) filters.
 Casual recursive filters.
 """
-import cmath
+
 from abc import ABC, abstractmethod
-from collections.abc import Iterable, Collection
+from collections.abc import Iterable, Collection, Generator, Iterator
 from typing import TypeAlias
 
 from numpy import float64
@@ -19,18 +19,8 @@ class IIRFilter(Filter, ABC):
     Abstract base class for Infinite Impulse Response (IIR) filters.
     """
     @abstractmethod
-    def transfer_function(self, z: complex) -> complex:
-        """The transfer function of the filter."""
-        raise NotImplementedError
-
-    @abstractmethod
     def difference_eq(self, *args: float) -> float:
         """The difference equation of the filter."""
-        raise NotImplementedError
-
-    @abstractmethod
-    def apply(self, x: list[float]) -> list[float]:
-        """Apply the filter to a list of samples."""
         raise NotImplementedError
 
 
@@ -103,21 +93,6 @@ class BiquadFilter(IIRFilter):
         a0, a1, a2 = self._coefs_a
         return 1 / a0 * (b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2)
 
-    def response_at(self, w: float) -> complex:
-        """Returns the complex response factor ``H(z)`` at given NORMALIZED ANGULAR frequency ``w``.
-        (``z = exp(jw)`` where ``w = 2 * pi * freq / sampling_frequency``)
-
-          - ``|H(z)|`` -> amplitude response factor
-          - ``arg(H(z))`` -> phase shift (rads)
-        """
-        return self.transfer_function(cmath.rect(1, w))
-
-    def frequency_resp_at(self, f: float) -> float:
-        return abs(self.response_at(f))
-
-    def phase_resp_at(self, f: float) -> float:
-        return cmath.phase(self.response_at(f))
-
     def _apply(self, x: Iterable[float]) -> list[float]:
         """Apply using vanilla python."""
         x = list(x)
@@ -134,13 +109,20 @@ class BiquadFilter(IIRFilter):
         return lfilter(self._coefs_b, self._coefs_a, x)
 
     def apply(self, x: Collection[float]) -> list[float] | NDArray[float64]:
-        """Apply as a discrete filter to a list of samples."""
         if len(x) > 1000:
             return self._apply_scipy(x)
         return self._apply(x)
 
+    def apply_on(self, stream: Iterator[float]) -> Generator[float, None, None]:
+        x2, x1 = 0., 0.
+        y2, y1 = 0., 0.
+        for x in stream:
+            y = self.difference_eq(x, x1, x2, y1, y2)
+            yield y
+            y2, y1 = y1, y
+            x2, x1 = x1, x
+
     def impulse_resp(self, n: int) -> list[float] | NDArray[float64]:
-        """Generates the impulse response of the filter for ``n`` samples."""
         x = [0.] * n
         x[0] = 1
         return self.apply(x)
