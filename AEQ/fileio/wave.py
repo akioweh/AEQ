@@ -6,25 +6,28 @@ Utilities for reading and writing WAV files
 import struct
 from collections.abc import Iterable
 from dataclasses import dataclass, astuple
+from io import SEEK_CUR
 from itertools import zip_longest
-from typing import Final, TypeAlias, Literal, TYPE_CHECKING
+from typing import Final, TypeAlias, Literal
+from warnings import warn
 
-if TYPE_CHECKING:
-    from numpy import ndarray
+from numpy import float64, int32
+from numpy.typing import NDArray
 
 SampleRate: TypeAlias = Literal[8000, 11025, 16000, 22050, 32000, 44100, 48000, 96000, 192000, 384000]
 BitDepth: TypeAlias = Literal[8, 16, 24, 32, 64]  # 64 is for floating point samples only
 SampleType: TypeAlias = int | float
-Channel: TypeAlias = 'list[SampleType] | ndarray'
+SampleType_np: TypeAlias = int32 | float64
+Channel: TypeAlias = list[SampleType] | NDArray[SampleType_np]
 
-INT_TYPES: Final[dict[BitDepth, str]] = {
+INT_TYPES: Final[dict[int, str]] = {
     8: 'b',
     16: 'h',
     # 24 is not supported by struct
     32: 'i'
 }
 
-FLOAT_TYPES: Final[dict[BitDepth, str]] = {
+FLOAT_TYPES: Final[dict[int, str]] = {
     32: 'f',
     64: 'd'
 }
@@ -48,6 +51,7 @@ class WaveFormat:
     encoding: str
 
     def __iter__(self):
+        # noinspection PyTypeChecker
         return iter(astuple(self))
 
 
@@ -89,43 +93,75 @@ def parse_riff(file: str) -> tuple[bytes, WaveFormat, dict | None]:
 
         extra_data = {}
 
+        read_size = 4  # 4 is already read as b'WAVE'
         next_chunk = f.read(8)
+        seen_fmt = False
+        seen_data = False
         while next_chunk:
+            assert len(next_chunk) == 8, 'Unexpected end of file'
+            read_size += 8
             chunk_tag, chunk_size = struct.unpack('<4sI', next_chunk)
 
             if chunk_tag == b'INFO':
-                f.read(chunk_size)  # skip INFO chunk
+                f.seek(chunk_size, SEEK_CUR)  # skip INFO chunk
+                read_size += chunk_size
 
             elif chunk_tag == b'fmt ':
-                assert chunk_size in (16, 18, 40), 'Incorrect chunk size'
+                assert not seen_fmt, 'Multiple fmt chunks detected'
+                seen_fmt = True
+                assert chunk_size in (16, 18, 40), f'Unexpected chunk size: {chunk_size}. Expected 16, 18, or 40'
 
-                f_type, channels, sample_rate, byte_rate, block_align, bit_depth = struct.unpack('<HHIIHH', f.read(16))
-                assert byte_rate == sample_rate * channels * bit_depth // 8, 'Incorrect byte rate'
-                assert block_align == channels * bit_depth // 8, 'Incorrect block align'
+                format_tag, n_channels, sample_rate, byte_rate, block_align, bit_depth = struct.unpack('<HHIIHH', f.read(16))
+                read_size += 16
+                assert byte_rate == sample_rate * n_channels * bit_depth // 8, 'Incorrect byte rate'
+                assert block_align == n_channels * bit_depth // 8, 'Incorrect block align'
 
                 if chunk_size > 16:  # read extra data for non-PCM formats (fmt extension)
                     fmt_ext_size = struct.unpack('<H', f.read(2))[0]
+                    read_size += 2
                     assert fmt_ext_size in (0, 22), 'Incorrect fmt extension size'
 
                     if fmt_ext_size == 22:
                         valid_bits_per_sample, channel_mask, sub_format = struct.unpack('<HH16s', f.read(20))
+                        read_size += 20
+                        warn(f'RIFF fmt extension block detected. '
+                             f'Extensible format is not fully supported. '
+                             f'Ignoring extra data: {valid_bits_per_sample}, {channel_mask}, {sub_format}')
+                        assert valid_bits_per_sample <= bit_depth, (f'unexpected valid bits per sample: {valid_bits_per_sample}'
+                                                                    f'against bit depth: {bit_depth}')
 
-                # assert (f_type == 1) ^ (chunk_size > 16), 'Incorrect format'
+            elif chunk_tag == b'fact':
+                assert chunk_size == 4, f'Unexpected fact chunk size: {chunk_size}. Expected 4'
+                f.seek(4, SEEK_CUR)  # skip fact chunk
+                read_size += 4
 
             elif chunk_tag == b'data':
+                assert not seen_data, 'Multiple data chunks detected'
+                seen_data = True
                 data = f.read(chunk_size)
+                read_size += chunk_size
+                if chunk_size % 2:
+                    f.seek(1, SEEK_CUR)  # skip padding byte
+                    read_size += 1
 
             else:
                 unknown = f.read(chunk_size)
+                read_size += chunk_size
                 extra_data[chunk_tag] = unknown
 
             next_chunk = f.read(8)
 
-        if f_type == 1:
+        assert seen_fmt, 'No fmt chunk found'
+        assert seen_data, 'No data chunk found'
+        assert read_size == size, 'File size mismatch'
+
+        if format_tag == 1:
             encoding = f'PCM_{bit_depth}'
-        elif f_type == 3:
+        elif format_tag == 3:
             encoding = f'FLOAT_{bit_depth}'
-        format_info = WaveFormat(f_type, channels, sample_rate, bit_depth, encoding)
+        else:
+            raise ValueError(f'Unsupported encoding: {format_tag:04X}')
+        format_info = WaveFormat(format_tag, n_channels, sample_rate, bit_depth, encoding)
 
         if not extra_data:
             extra_data = None
@@ -199,36 +235,39 @@ def encode_data(samples: Channel | list[Channel], format_info: WaveFormat) -> by
     if more than one channel, samples should be a tuple of lists of samples for each channel
     """
 
-    enc_format, channels, sample_rate, bit_depth, encoding = format_info
+    enc_format, n_channels, sample_rate, bit_depth, encoding = format_info
 
-    if channels > 1:  # interleave channels
+    if isinstance(samples, Iterable) and isinstance(samples[0], Iterable):
+        assert n_channels == len(samples), 'Channel count mismatch'
         filler = 0.0 if enc_format == 3 else 0
-
-        samples: tuple[Channel]
-        samples: Channel = [
+        # noinspection PyArgumentList
+        samples_ = [
             frame
             for channel in zip_longest(*samples, fillvalue=filler)
             for frame in channel
         ]
+    else:
+        assert n_channels == 1, 'Single channel data must be a list'
+        samples_ = samples
 
     if enc_format == 1:  # int-PCM
         if bit_depth == 24:
             # not a valid C-type, so we have to pack manually
             data = b''.join(
                 sample.to_bytes(3, 'little', signed=True)
-                for sample in samples
+                for sample in samples_
             )
         else:
             if bit_depth not in INT_TYPES:
                 raise ValueError(f'Unsupported bit depth: {bit_depth}')
             ctype = INT_TYPES[bit_depth]
-            data = struct.pack(f'<{len(samples)}{ctype}', *samples)
+            data = struct.pack(f'<{len(samples_)}{ctype}', *samples_)
 
     elif enc_format == 3:  # float-PCM
         if bit_depth not in FLOAT_TYPES:
             raise ValueError(f'Unsupported floating bit depth: {bit_depth}')
         ctype = FLOAT_TYPES[bit_depth]
-        data = struct.pack(f'<{len(samples)}{ctype}', *samples)
+        data = struct.pack(f'<{len(samples_)}{ctype}', *samples_)
 
     else:
         raise ValueError(f'Unsupported encoding: {enc_format}')
@@ -255,9 +294,19 @@ def write_riff(file: str, data: bytes, format_info: WaveFormat, extra_data: dict
     fmt = (enc_format, channels, sample_rate, byte_rate, block_align, bit_depth)
     write_buffer.append(struct.pack('<HHIIHH', *fmt))
 
+    # fact chunk
+    if enc_format == 3:  # float-PCM
+        fact = 4, len(data) // (bit_depth // 8)
+        write_buffer.extend((
+            b'fact',
+            struct.pack('<II', *fact)
+        ))
+
     # extra data
     if extra_data:
         for key, value in extra_data.items():
+            assert isinstance(key, bytes), 'Extra data key must be bytes'
+            assert isinstance(value, bytes), 'Extra data value must be bytes'
             write_buffer.extend((
                 key,
                 struct.pack('<I', len(value)),
