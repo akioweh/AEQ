@@ -6,7 +6,7 @@ from functools import reduce
 from typing import TypeAlias
 
 import numpy as np
-from numpy import float64
+from numpy import float64, complex128
 from numpy.typing import NDArray
 from scipy.signal import sosfilt, sosfreqz
 
@@ -384,11 +384,10 @@ class ParametricEqualizer(Filter):
         Each tuple contains the 6 NORMALIZED coefficients of a biquad filter,
         a SOS, in the form: (b0/a0, b1/a0, b2/a0, 1, a1/a0, a2/a0).
         """
-        # noinspection PyTypeChecker
-        return [(*flt.coefs_b_n, *flt.coefs_a_n) for flt in self.filters]
+        return [flt.coefs_b_n + flt.coefs_a_n for flt in self.filters]
 
-    def transfer_function(self, z: complex) -> complex:
-        pass
+    def transfer_function(self, z: complex) -> complex | complex128:
+        return np.prod([flt.transfer_function(z) for flt in self.filters])
 
     def add_filter(self, filter_: PEQFilter):
         """Add a pre-made ``PEQFilter`` object.
@@ -466,7 +465,7 @@ class ParametricEqualizer(Filter):
         """Renders a discretized frequency response of the entire equalizer by sampling the frequency range.
 
         The first list contains the sampled frequencies; the second list contains the corresponding responses.
-        The response are magnitude factors (not gain; for that use ``frequency_response_db_arr``).
+        The response are magnitude factors (not gain; for that use ``frequency_response_db``).
         """
         if max_f is None:
             max_f = self.sample_rate / 2

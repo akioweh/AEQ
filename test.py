@@ -1,14 +1,18 @@
 from math import sqrt
 
-from scipy import signal as sgn
+import numpy as np
+from scipy import fft, signal as sgn
 
-from AEQ import parametric as peq
-from AEQ.fileio import write_wave, create_format
+from AEQ import parametric as peq, plot_fr
+from AEQ.fileio import create_format
 
 fs = 384_000
 
 EQ = peq.ParametricEqualizer(fs)
 
+# Harman in-ear 2019 Target.
+# !!=> with -3.5 dB sqrt(2)/2 Q low shelf @ 105 Hz
+# !!=> On autoeq.app, this means adjusting the 9.5 dB (default) bass boost to 6.0 dB
 EQ.add_pre_amp(-6.00)
 EQ.add_loshelf(  105, -0.7, 0.70)
 EQ.add_peaking(  143, -3.9, 0.42)
@@ -21,6 +25,7 @@ EQ.add_peaking( 6093,  4.2, 4.52)
 EQ.add_peaking( 8610,  1.1, 4.48)
 EQ.add_hishelf(10000,  3.4, 0.70)
 
+# Personal resonance adjustments
 EQ.add_peaking( 5500, -5.0, 5.00)
 EQ.add_peaking( 5900,-12.5, 2.30)
 EQ.add_peaking( 6500, -4.0,12.00)
@@ -28,6 +33,7 @@ EQ.add_peaking( 7000, -4.0,12.00)
 EQ.add_peaking( 8500,  7.5, 3.50)
 EQ.add_peaking(11500, -6.7, 7.00)
 
+# Personal bass tuning
 EQ.add_loshelf(110, 3.0, sqrt(2) / 2)
 EQ.add_loshelf(38, 3.0, 1.00)
 # EQ.add_pre_amp(-2.40)
@@ -58,19 +64,18 @@ fir = sgn.firwin2(nt + 1, f_s, fr, fs=fs, antisymmetric=False, window=None)
 
 print(len(fir))
 print(sum(fir))
-print(fir[:10], fir[-10:])
 fmt = create_format(1, fs, 64, True)
-write_wave('eq2.wav', fir, fmt)
+# write_wave('eq2.wav', fir, fmt)
 
 # Freq and phase response using transfer function
-# w, h = sgn.freqz(fir, fs=fs, worN=1_000_000)
-# mag = 20 * np.log10(np.abs(h))
-# phase = np.angle(h)
-# plot_fr(w, mag, log=True, x_min=16, x_max=22_000, y_max=1, y_min=-20)
-# plot_fr(w, phase, log=False, x_min=16, x_max=22_000, title='Phase Response')
+w, h = sgn.freqz(fir, fs=fs, worN=1_000_000)
+mag = 20 * np.log10(np.abs(h))
+phase = np.angle(h)
+plot_fr(w, mag, log=True, x_min=16, x_max=22_000, y_max=1, y_min=-20)
+plot_fr(w, phase, log=False, x_min=16, x_max=22_000, title='Phase Response')
 
 # Freq response using FFT from IR
-# y = fft.rfft(fir)
-# x = fft.rfftfreq(len(fir), 1 / fs)
-# mag = 20 * np.log10(np.abs(y))
-# plot_fr(x, mag, log=True, x_min=16, x_max=22_000, y_max=1, y_min=-20)
+y = fft.rfft(fir)
+x = fft.rfftfreq(len(fir), 1 / fs)
+mag = 20 * np.log10(np.abs(y))
+plot_fr(x, mag, log=True, x_min=16, x_max=22_000, y_max=1, y_min=-20)
