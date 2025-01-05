@@ -6,7 +6,8 @@ from typing import TypeAlias
 import numpy as np
 from numpy import complex128, float64
 from numpy.typing import NDArray
-from scipy.signal import sosfilt, sosfreqz
+from scipy.fft import next_fast_len
+from scipy.signal import freqz_sos, sosfilt
 
 from .base import Filter
 from .iir import BiquadFilter
@@ -444,7 +445,7 @@ class ParametricEqualizer(Filter):
             min_f: float = 15,
             max_f: float | None = 22_000,
             log: bool = True
-    ) -> tuple[list[float], list[float]]:
+    ) -> tuple[NDArray[float64], NDArray[float64]]:
         """Renders a discretized frequency response of the entire equalizer by sampling the frequency range.
 
         The first list contains the sampled frequencies; the second list contains the corresponding responses.
@@ -452,9 +453,9 @@ class ParametricEqualizer(Filter):
         """
         if max_f is None:
             max_f = self.sample_rate / 2
+        assert max_f <= self.sample_rate / 2, 'Maximum frequency must not be greater than half the sample rate.'
         assert min_f < max_f, 'Minimum frequency must be smaller than maximum frequency.'
         assert min_f >= 0, 'Minimum frequency cannot be negative.'
-        assert max_f <= self.sample_rate / 2, 'Maximum frequency must not be greater than half the sample rate.'
 
         if log:  # craft a logarithmic frequency range
             assert min_f > 0, 'Minimum frequency must be positive for logarithmic scale.'
@@ -463,23 +464,21 @@ class ParametricEqualizer(Filter):
             f_s = np.linspace(min_f, max_f, nsamples)
 
         # calculate response
-        f_s, resp = sosfreqz(self.coefs_sos, worN=f_s, fs=self.sample_rate)
+        f_s, resp = freqz_sos(self.coefs_sos, worN=f_s, fs=self.sample_rate)
         fr = np.abs(resp)  # convert to magnitude factor
-
-        # just checking if the numpy ranges accurately start and stop at the given limits
-        assert f_s[0] == min_f, 'Generated range does not start at the minimum frequency.'
-        assert f_s[-1] == max_f, 'Generated range does not end at the maximum frequency.'
         return f_s, fr
 
-    def frequency_resp_db(
-            self, nsamples: int = 10_000,
-            min_f: float = 15,
-            max_f: float | None = 22_000,
-            log: bool = True
-    ) -> tuple[list[float], list[float]]:
-        """Like ``frequency_response`` but returns the response in decibels."""
-        f_s, fr = self.frequency_resp(nsamples, min_f, max_f, log)
-        return f_s, self.decibelize(fr)
+    def frequency_resp_fast(self, min_samples: int = 10_000) -> tuple[NDArray[float64], NDArray[float64]]:
+        """Like ``frequency_resp``, but has a linear sampling range
+        spanning the entire frequency range and with a non-specific number of samples.
+
+        This allows the frequency response to be rendered faster using FFT rather than
+        direct calculation through the transfer function.
+        """
+        worN = next_fast_len(min_samples)
+        f_s, resp = freqz_sos(self.coefs_sos, worN=worN, fs=self.sample_rate)
+        fr = np.abs(resp)
+        return f_s, fr
 
     def apply(self, x: Collection[float]) -> list[float] | NDArray[float64]:
         return sosfilt(self.coefs_sos, x)
