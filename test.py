@@ -1,10 +1,8 @@
 from math import sqrt
 
 import numpy as np
-from scipy import fft, signal as sgn
 
 from AEQ import parametric as peq, plot_fr
-from AEQ.fileio import create_format
 
 fs = 384_000
 
@@ -48,11 +46,17 @@ EQ.add_loshelf(38, 3.0, 1.00)
 # EQ.add_hi_pass(24, sqrt(2) / 2)
 # EQ.add_hi_pass(24, sqrt(2) / 2)
 
+f_s = np.logspace(0, np.log10(fs / 2), 1_000_000)
+r = EQ.frequency_resp_at(f_s)
+r = 20 * np.log10(r)
+plot_fr(f_s, r, x_min=1, x_max=fs / 2, log=True, title='FR 1')
 
-f_s, fr = EQ.frequency_resp(1_000_000, min_f=0, max_f=fs / 2, log=False)
+
+f_s, fr = EQ.frequency_resp_db(1_000_000, min_f=0, max_f=fs / 2, log=False)
 nt = fs // 32
+plot_fr(f_s, fr, x_min=1, x_max=fs / 2, log=True, title='FR 2')
 
-fir = sgn.firwin2(nt + 1, f_s, fr, fs=fs, antisymmetric=False, window=None)
+# fir = sgn.firwin2(nt + 1, f_s, fr, fs=fs, antisymmetric=False, window=None)
 
 # fir = EQ.impulse_resp(nt // 2 + 1)
 # fir = np.concatenate((fir[:0:-1], fir))
@@ -62,20 +66,20 @@ fir = sgn.firwin2(nt + 1, f_s, fr, fs=fs, antisymmetric=False, window=None)
 # wind = sgn.get_window('hamming', len(fir))
 # fir = fir * wind
 
-print(len(fir))
-print(sum(fir))
-fmt = create_format(1, fs, 64, True)
-# write_wave('eq2.wav', fir, fmt)
-
-# Freq and phase response using transfer function
-w, h = sgn.freqz(fir, fs=fs, worN=1_000_000)
-mag = 20 * np.log10(np.abs(h))
-phase = np.angle(h)
-plot_fr(w, mag, log=True, x_min=16, x_max=22_000, y_max=1, y_min=-20)
-plot_fr(w, phase, log=False, x_min=16, x_max=22_000, title='Phase Response')
-
-# Freq response using FFT from IR
-y = fft.rfft(fir)
-x = fft.rfftfreq(len(fir), 1 / fs)
-mag = 20 * np.log10(np.abs(y))
-plot_fr(x, mag, log=True, x_min=16, x_max=22_000, y_max=1, y_min=-20)
+# print(len(fir))
+# print(sum(fir))
+# fmt = create_format(1, fs, 64, True)
+# # write_wave('eq2.wav', fir, fmt)
+#
+# # Freq and phase response using transfer function
+# w, h = sgn.freqz(fir, fs=fs, worN=1_000_000)
+# mag = 20 * np.log10(np.abs(h))
+# phase = np.angle(h)
+# plot_fr(w, mag, log=True, x_min=16, x_max=22_000, y_max=1, y_min=-20)
+# plot_fr(w, phase, log=False, x_min=16, x_max=22_000, title='Phase Response')
+#
+# # Freq response using FFT from IR
+# y = fft.rfft(fir)
+# x = fft.rfftfreq(len(fir), 1 / fs)
+# mag = 20 * np.log10(np.abs(y))
+# plot_fr(x, mag, log=True, x_min=16, x_max=22_000, y_max=1, y_min=-20)

@@ -1,7 +1,7 @@
 from matplotlib import pyplot as plt
 from matplotlib.axes import Axes
 
-plt.ion()
+# plt.ion()
 
 
 def plot_fr(f_s, y, y_max=None, y_min=None, x_min=None, x_max=None, log=True, title='Frequency Response'):
@@ -25,4 +25,4 @@ def plot_fr(f_s, y, y_max=None, y_min=None, x_min=None, x_max=None, log=True, ti
         ax.set_ylim(bottom=y_min)
     ax.grid()
     fig.tight_layout()
-    fig.show()
+    plt.show()
