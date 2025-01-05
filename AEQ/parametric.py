@@ -1,12 +1,10 @@
-import cmath
 import math
 from abc import abstractmethod
-from collections.abc import Collection, Iterable, Iterator, Generator
-from functools import reduce
+from collections.abc import Collection, Generator, Iterable, Iterator
 from typing import TypeAlias
 
 import numpy as np
-from numpy import float64, complex128
+from numpy import complex128, float64
 from numpy.typing import NDArray
 from scipy.signal import sosfilt, sosfreqz
 
@@ -52,7 +50,7 @@ class PEQFilter(BiquadFilter):
         :param allow_S: whether to allow Slope variant of Q or BW
         :param name: filter type name (default is subclass name)
         """
-        super().__init__()
+        super().__init__(fs=fs)
 
         if S is not None and not allow_S:
             raise ValueError('Slope variant of Q or BW is not allowed.')
@@ -62,7 +60,6 @@ class PEQFilter(BiquadFilter):
 
         # filter properties
         self._name = name if name is not None else self.__class__.__name__  # filter type name
-        self._fs = fs
         self._allow_S = allow_S  # allow slope variant of Q or BW
         self._has_f0 = f0 is not None  # allow the setting of a center frequency
         self._has_gain = gain is not None  # allow the setting of a gain
@@ -99,7 +96,7 @@ class PEQFilter(BiquadFilter):
     @staticmethod
     def Q_to_S(Q: float, gain: float) -> float:
         A = 10 ** (gain / 40)
-        return 1 / ((1 / Q**2 - 2) / (A + 1 / A) + 1)
+        return 1 / ((1 / Q ** 2 - 2) / (A + 1 / A) + 1)
 
     def _calc_intervars(self):
         """Calculate intermediate variables for the filter coefficients.
@@ -134,11 +131,7 @@ class PEQFilter(BiquadFilter):
         self._calc_intervars()
         self._calc_coefs()
 
-    @property
-    def fs(self) -> float:
-        return self._fs
-
-    @fs.setter
+    @BiquadFilter.fs.setter
     def fs(self, fs: float):
         self._fs = fs
         self._calc_all()
@@ -215,17 +208,6 @@ class PEQFilter(BiquadFilter):
     @name.setter
     def name(self, name: str):
         self._name = name
-
-    def response_at(self, f: float) -> complex:
-        """Returns the complex response factor ``H(z)`` at the given frequency ``f``.
-        (``z = exp(jw)`` where ``w = 2 * pi * f / fs``)
-
-          - ``|H(z)|`` -> amplitude response factor
-          - ``arg(H(z))`` -> phase shift (rads)
-        """
-        # modify IIRFilter's implementation to use absolute frequency instead of normalized angular frequency
-        w = 2 * math.pi * f / self._fs
-        return super().response_at(w)
 
     def __str__(self):
         return (f'{self._name} ==> f0: {self._f0}, Q: {self._Q}, gain: {self._gain} \n'
@@ -375,7 +357,17 @@ class ParametricEqualizer(Filter):
 
     def __init__(self, sample_rate: float = 1, filters: list[PEQFilter] = None):
         self.sample_rate = sample_rate
-        self.filters = filters if filters is not None else []
+        self.filters = list(filters) if filters is not None else []
+
+    @property
+    def fs(self) -> float:
+        return self.sample_rate
+
+    @fs.setter
+    def fs(self, fs: float):
+        self.sample_rate = fs
+        for flt in self.filters:
+            flt.fs = fs
 
     @property
     def coefs_sos(self) -> list[t6ple]:
@@ -386,8 +378,13 @@ class ParametricEqualizer(Filter):
         """
         return [flt.coefs_b_n + flt.coefs_a_n for flt in self.filters]
 
-    def transfer_function(self, z: complex) -> complex | complex128:
-        return np.prod([flt.transfer_function(z) for flt in self.filters])
+    def transfer_function(self, z):
+        if isinstance(z, np.ndarray):
+            temp = np.array([flt.transfer_function(z) for flt in self.filters], ndmin=2)
+            return np.prod(temp, axis=0)
+
+        temp = np.fromiter((flt.transfer_function(z) for flt in self.filters), complex128)
+        return np.prod(temp)
 
     def add_filter(self, filter_: PEQFilter):
         """Add a pre-made ``PEQFilter`` object.
@@ -432,20 +429,6 @@ class ParametricEqualizer(Filter):
 
     def add_pre_amp(self, gain: float):
         return self.add_filter(PreAmpFilter(gain, fs=self.sample_rate))
-
-    def response_at(self, f: float) -> complex:
-        """Response (complex output) at a given frequency."""
-        if not self.filters:
-            return complex(1, 0)
-        return reduce(lambda x, y: x * y, (flt.response_at(f) for flt in self.filters))
-
-    def frequency_resp_at(self, f: float) -> float:
-        """Frequency response (magnitude factor) at a given frequency."""
-        return abs(self.response_at(f))
-
-    def phase_resp_at(self, f: float) -> float:
-        """Phase shift at a given frequency."""
-        return cmath.phase(self.response_at(f))
 
     @staticmethod
     def decibelize(x: float | Collection[float]) -> float | list[float]:
@@ -511,11 +494,3 @@ class ParametricEqualizer(Filter):
             yield y
             y2, y1 = y1, y
             x2, x1 = x1, x
-
-    def impulse_resp(self, n: int) -> list[float] | NDArray[float64]:
-        """Generates the impulse response of the entire equalizer for ``n`` samples."""
-        x = np.zeros(n)
-        x[0] = 1
-        if not self.filters:
-            return x
-        return sosfilt(self.coefs_sos, x)
