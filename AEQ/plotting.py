@@ -40,7 +40,7 @@ def plot_resp(
     plt.show()
 
 
-def plot_fr_db(
+def plot_fr(
         f_s,
         y,
         y_max: float = None,

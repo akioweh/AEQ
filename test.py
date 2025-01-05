@@ -1,8 +1,6 @@
 from math import sqrt
 
-import numpy as np
-
-from AEQ import parametric as peq, plot_fr
+from AEQ import parametric as peq
 
 fs = 384_000
 
@@ -46,16 +44,9 @@ EQ.add_loshelf(38, 3.0, 1.00)
 # EQ.add_hi_pass(24, sqrt(2) / 2)
 # EQ.add_hi_pass(24, sqrt(2) / 2)
 
-f_s = np.logspace(0, np.log10(fs / 2), 1_000_000)
-r = EQ.frequency_resp_at(f_s)
-r = 20 * np.log10(r)
-plot_fr(f_s, r, x_min=1, x_max=fs / 2, log=True, title='FR 1')
 
 
-f_s, fr = EQ.frequency_resp_db(1_000_000, min_f=0, max_f=fs / 2, log=False)
-nt = fs // 32
-plot_fr(f_s, fr, x_min=1, x_max=fs / 2, log=True, title='FR 2')
-
+# nt = fs // 32
 # fir = sgn.firwin2(nt + 1, f_s, fr, fs=fs, antisymmetric=False, window=None)
 
 # fir = EQ.impulse_resp(nt // 2 + 1)
